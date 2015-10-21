@@ -3,36 +3,59 @@ package core
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
+	"time"
 	"zmopenapi-sdk/request"
 	"zmopenapi-sdk/response"
 	"zmopenapi-sdk/util"
 )
 
-const (
-	ErrorNetwork     = errors.New("network error!")
-	ErrorInvalidData = errors.New("invalid response data!")
-	ErrorForgedData  = errors.New("forged response data!")
-)
+var ErrorNetwork error = errors.New("network error!")
+var ErrorInvalidData error = errors.New("invalid response data!")
+var ErrorForgedData error = errors.New("forged response data!")
 
 type ZMOpenApiClient interface {
 	ExecuteCommonRequest(req *request.CommonRequest) (*response.CommonResponse, error)
 	ExecuteFeedbackRequest(req *request.FeedbackRequest) (*response.FeedbackResponse, error)
 	ExecuteCheckAuthRequest(req *request.CheckAuthRequest) (*response.CheckAuthResponse, error)
 	ExeucteAuthEngineRequest(req *request.AuthEngineRequest) (*response.AuthEngineResponse, error)
+	BuildAuthUrl(req *request.AuthEngineRequest) (string, error)
+	BuildAgreementUrl(req *request.AgreementRequest) (string, error)
 }
 
 type DefaultZMOpenApiClient struct {
-	PublicKey         string
-	PrivateKey        string
-	Charset           string
-	ConnectionTimeout uint32
-	ReadTimeout       uint32
-	Host              string
+	PublicKey  string
+	PrivateKey string
+	Host       string
+	charset    string
+	AppId      string
+	MerchantId string
+	c          *http.Client
+}
+
+//NewZMOpenApiClient return a new ZMOpenApiClient
+func NewZMOpenApiClient(publicKey, privateKey, appId, merchantId string) *ZMOpenApiClient {
+	client := &http.Client{
+		Timeout: time.Duration(time.Second * 3),
+	}
+	return &DefaultZMOpenApiClient{
+		c:          client,
+		charset:    util.DefaultCharset,
+		PublicKey:  publicKey,
+		PrivateKey: privateKey,
+		AppId:      appId,
+		MerchantId: merchantId,
+	}
 }
 
 func (client *DefaultZMOpenApiClient) ExecuteCommonRequest(req *request.CommonRequest) (*response.CommonResponse, error) {
-	content := request.BuildUrl(req)
-	response, err := request.HttpPost(client.Host+util.CommonURI, content, client.Charset)
+	req.AppId = client.AppId
+	req.MerchantId = client.MerchantId
+	content, err := request.BuildUrl(req)
+	if err != nil {
+		return nil, err
+	}
+	response, err := request.HttpPost(client.c, client.Host+util.CommonURI, content, client.charset)
 	if err != nil {
 		return nil, ErrorNetwork
 	}
@@ -44,10 +67,9 @@ func (client *DefaultZMOpenApiClient) ExecuteCommonRequest(req *request.CommonRe
 	if commonResponse.Success {
 		encryptedResponse := commonResponse.Response
 		data := util.DecryptBase64(encryptedResponse)
-		result := util.DecryptRSA(data)
-		generated := util.EncryptSHA(result)
-		if generated == util.VerifySignature(generated, commonResponse.SignResponse) {
-			commonResponse.Result = result
+		decrypted := util.DecryptRSA(data)
+		if util.VerifySignature(decrypted, commonResponse.SignResponse) {
+			commonResponse.Result = string(decrypted)
 		} else {
 			return nil, ErrorForgedData
 		}
@@ -56,8 +78,13 @@ func (client *DefaultZMOpenApiClient) ExecuteCommonRequest(req *request.CommonRe
 }
 
 func (client *DefaultZMOpenApiClient) ExecuteFeedbackRequest(req *request.FeedbackRequest) (*response.FeedbackResponse, error) {
-	content := request.BuildUrl(req)
-	response, err := request.HttpPost(client.Host+util.FeedbackURI, content, client.Charset)
+	req.AppId = client.AppId
+	req.MerchantId = client.MerchantId
+	content, err := request.BuildUrl(req)
+	if err != nil {
+		return nil, err
+	}
+	response, err := request.HttpPost(client.c, client.Host+util.FeedbackURI, content, client.charset)
 	if err != nil {
 		return nil, ErrorNetwork
 	}
@@ -70,8 +97,13 @@ func (client *DefaultZMOpenApiClient) ExecuteFeedbackRequest(req *request.Feedba
 }
 
 func (client *DefaultZMOpenApiClient) ExecuteCheckAuthRequest(req *request.CheckAuthRequest) (*response.CheckAuthResponse, error) {
-	content := request.BuildUrl(req)
-	response, err := request.HttpPost(client.Host+util.CheckAuthURI, content, client.Charset)
+	req.AppId = client.AppId
+	req.MerchantId = client.MerchantId
+	content, err := request.BuildUrl(req)
+	if err != nil {
+		return nil, err
+	}
+	response, err := request.HttpPost(client.c, client.Host+util.CheckAuthURI, content, client.charset)
 	if err != nil {
 		return nil, ErrorNetwork
 	}
@@ -84,8 +116,13 @@ func (client *DefaultZMOpenApiClient) ExecuteCheckAuthRequest(req *request.Check
 }
 
 func (client *DefaultZMOpenApiClient) ExecuteAuthEngineRequest(req *request.AuthEngineRequest) (*response.AuthEngineResponse, error) {
-	content := request.BuildUrl(req)
-	response, err := request.HttpPost(client.Host+util.AuthEngineURI, content, client.Charset)
+	req.AppId = client.AppId
+	req.MerchantId = client.MerchantId
+	content, err := request.BuildUrl(req)
+	if err != nil {
+		return nil, err
+	}
+	response, err := request.HttpPost(client.c, client.Host+util.AuthEngineURI, content, client.charset)
 	if err != nil {
 		return nil, ErrorNetwork
 	}
@@ -95,4 +132,18 @@ func (client *DefaultZMOpenApiClient) ExecuteAuthEngineRequest(req *request.Auth
 		return nil, ErrorInvalidData
 	}
 	return authEngineResponse, nil
+}
+
+func (client *DefaultZMOpenApiClient) BuildAuthUrl(req *request.AuthEngineRequest) (string, error) {
+	req.AppId = client.AppId
+	req.MerchantId = client.MerchantId
+	content, err := request.BuildUrl(req)
+	return client.Host + util.AuthEngineURI + "?" + content, err
+}
+
+func (client *DefaultZMOpenApiClient) BuildAgreementUrl(req *request.AgreementRequest) (string, error) {
+	req.AppId = client.AppId
+	req.MerchantId = client.MerchantId
+	content, err := request.BuildUrl(req)
+	return client.Host + util.AgreementURI + "?" + content, err
 }

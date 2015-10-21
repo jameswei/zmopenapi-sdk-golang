@@ -1,7 +1,7 @@
 package request
 
 import (
-	"fmt"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -9,18 +9,11 @@ import (
 	"zmopenapi-sdk/util"
 )
 
-func BuildUrl(r BaseRequestInterface) string {
+var EncryptionFailed error = errors.New("encryption failed")
+
+func BuildUrl(r BaseRequestInterface) (string, error) {
 	queryString := buildQuery(r.GetParams())
 	return encrytQuery(queryString, r.GetAppId())
-}
-
-func buildUrl(r BaseRequestInterface, url string) string {
-	queryString := buildQuery(r.GetParams())
-	if strings.ContainsAny(url, "?") {
-		return url + encrytQuery(queryString, r.GetAppId())
-	} else {
-		return url + "?" + encrytQuery(queryString, r.GetAppId())
-	}
 }
 
 func buildQuery(params map[string]string) string {
@@ -37,21 +30,28 @@ func buildQuery(params map[string]string) string {
 	return string(strings.Join(array, "&"))
 }
 
-func encrytQuery(queryString string, appId string) string {
+func encrytQuery(queryString string, appId string) (string, error) {
 	encrypted := make([]string, 0)
 	encrypted = append(encrypted, util.ParamNameParams, "=")
-	encrypted = append(encrypted, url.QueryEscape(util.EncryptBase64(util.EncryptRSA([]byte(queryString)))))
+	encryptedParams := util.EncryptBase64(util.EncryptRSA([]byte(queryString)))
+	if encryptedParams == "" {
+		return "", EncryptionFailed
+	}
+	encrypted = append(encrypted, url.QueryEscape(encryptedParams))
 	encrypted = append(encrypted, "&", util.ParamNameAppId, "=", appId)
 	encrypted = append(encrypted, "&", util.ParamNameCharset, "=", util.DefaultCharset)
 	encrypted = append(encrypted, "&", util.ParamNameSign, "=")
-	encrypted = append(encrypted, url.QueryEscape(string(
-		util.SignWithRSA(util.EncryptSHA([]byte(queryString))))))
+	signature := string(util.SignWithRSA([]byte(queryString)))
+	if signature == "" {
+		return "", EncryptionFailed
+	}
+	encrypted = append(encrypted, url.QueryEscape(signature))
 	encryptedQueryString := strings.Join(encrypted, "")
-	return encryptedQueryString
+	return encryptedQueryString, nil
 }
 
-func HttpPost(url string, content string, charset string) (string, error) {
-	resp, err := http.Post(url, "application/x-www-form-urlencoded;charset="+charset, strings.NewReader(content))
+func HttpPost(client *http.Client, url string, content string, charset string) (string, error) {
+	resp, err := client.Post(url, "application/x-www-form-urlencoded;charset="+charset, strings.NewReader(content))
 	if err != nil {
 		return "", err
 	}
