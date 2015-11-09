@@ -9,14 +9,22 @@ import (
 	x509 "crypto/x509"
 	base64 "encoding/base64"
 	pem "encoding/pem"
+	"linkedin/ginutil"
 )
 
 const (
-	AlgorithmSHA = "SHA"
-	AlgorithmMD5 = "MD5"
-	AlgorithmRSA = "RSA"
-	PrivateKey   = `REPLACE YOUR PRIVATE KEY`
-	PublicKey = `REPLACE YOUR PUBLIC KEY`
+	PrivateKey = `-----BEGIN PRIVATE KEY-----
+PUT YOUR PRIVATE KEY
+-----END PRIVATE KEY-----`
+	PublicKey = `-----BEGIN PUBLIC KEY-----
+PUT ZHIMA PUBLIC KEY
+-----END PUBLIC KEY-----`
+	TestPrivateKey = `-----BEGIN PRIVATE KEY-----
+PUT YOUR TEST PRIVATE KEY
+-----END PRIVATE KEY-----`
+	TestPublicKey = `-----BEGIN PUBLIC KEY-----
+PUT ZHIMA TEST PUBLIC KEY
+-----END PUBLIC KEY-----`
 )
 
 //EncryptBase64 encrypt given []byte with Base64 algorithm
@@ -62,7 +70,11 @@ func EncryptRSA(data []byte) []byte {
 	if data == nil {
 		return nil
 	}
-	block, _ := pem.Decode([]byte(PublicKey))
+	publicKey := []byte(PublicKey)
+	if !ginutil.IsProduction() {
+		publicKey = []byte(TestPublicKey)
+	}
+	block, _ := pem.Decode(publicKey)
 	if block == nil {
 		return nil
 	}
@@ -95,7 +107,11 @@ func DecryptRSA(data []byte) []byte {
 	if data == nil {
 		return nil
 	}
-	block, _ := pem.Decode([]byte(PrivateKey))
+	privateKey := []byte(PrivateKey)
+	if !ginutil.IsProduction() {
+		privateKey = []byte(TestPrivateKey)
+	}
+	block, _ := pem.Decode(privateKey)
 	if block == nil {
 		return nil
 	}
@@ -124,12 +140,15 @@ func DecryptRSA(data []byte) []byte {
 }
 
 //SignWithRSA sign given encrypted data with RSA algorithm
-func SignWithRSA(raw []byte) []byte {
+func SignRSA(raw []byte, algorithm crypto.Hash) []byte {
 	if raw == nil {
 		return nil
 	}
-	data := EncryptMD5(EncryptSHA(raw))
-	block, _ := pem.Decode([]byte(PrivateKey))
+	privateKey := []byte(PrivateKey)
+	if !ginutil.IsProduction() {
+		privateKey = []byte(TestPrivateKey)
+	}
+	block, _ := pem.Decode(privateKey)
 	if block == nil {
 		return nil
 	}
@@ -138,7 +157,13 @@ func SignWithRSA(raw []byte) []byte {
 		return nil
 	}
 	priv := privInterface.(*rsa.PrivateKey)
-	signed, err := rsa.SignPKCS1v15(rand.Reader, priv, crypto.MD5, data)
+	var data []byte
+	if algorithm == crypto.SHA1 {
+		data = EncryptSHA(raw)
+	} else {
+		data = EncryptMD5(EncryptSHA(raw))
+	}
+	signed, err := rsa.SignPKCS1v15(rand.Reader, priv, algorithm, data)
 	if err != nil {
 		return nil
 	}
@@ -146,12 +171,15 @@ func SignWithRSA(raw []byte) []byte {
 }
 
 //VerifySignature verify whether the given signature is correct
-func VerifySignature(raw []byte, signature string) bool {
+func VerifySignature(raw []byte, signature string, algorithm crypto.Hash) bool {
 	if raw == nil || signature == "" {
 		return false
 	}
-	data := EncryptMD5(EncryptSHA(raw))
-	block, _ := pem.Decode([]byte(PublicKey))
+	publicKey := []byte(PublicKey)
+	if !ginutil.IsProduction() {
+		publicKey = []byte(TestPublicKey)
+	}
+	block, _ := pem.Decode(publicKey)
 	if block == nil {
 		return false
 	}
@@ -160,7 +188,13 @@ func VerifySignature(raw []byte, signature string) bool {
 		return false
 	}
 	pub := pubInterface.(*rsa.PublicKey)
-	err = rsa.VerifyPKCS1v15(pub, crypto.MD5, data, DecryptBase64(signature))
+	var data []byte
+	if algorithm == crypto.SHA1 {
+		data = EncryptSHA(raw)
+	} else {
+		data = EncryptMD5(EncryptSHA(raw))
+	}
+	err = rsa.VerifyPKCS1v15(pub, algorithm, data, DecryptBase64(signature))
 	if err != nil {
 		return false
 	}
